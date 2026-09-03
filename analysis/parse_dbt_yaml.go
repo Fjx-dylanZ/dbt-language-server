@@ -148,6 +148,7 @@ type ModelProperties struct {
 	Name        AnnotatedField[string] `yaml:"name"`
 	Description AnnotatedField[string] `yaml:"description"`
 	ModelConfig AnnotatedMap           `yaml:"config"`
+	Columns     []ColumnProperties     `yaml:"columns"`
 	SchemaURI   string
 }
 
@@ -161,6 +162,12 @@ type SourceProperties struct {
 
 type SourceTableProperties struct {
 	Name        AnnotatedField[string] `yaml:"name"`
+	Description AnnotatedField[string] `yaml:"description"`
+}
+
+type ColumnProperties struct {
+	Name        AnnotatedField[string] `yaml:"name"`
+	DataType    AnnotatedField[string] `yaml:"data_type"`
 	Description AnnotatedField[string] `yaml:"description"`
 }
 
@@ -202,7 +209,7 @@ func parseYamlModels(projectRoot string, projYaml DbtProjectYaml) (map[string]Mo
 	modelMap := make(map[string]ModelProperties)
 	sourceMap := make(map[string]Source)
 
-	docsFiles := getDocsFiles(projYaml)
+	docsFiles := getDocsFiles(projectRoot, projYaml)
 	docsMap := processDocsFiles(docsFiles)
 
 	for _, path := range projYaml.ModelPaths.Value {
@@ -214,6 +221,11 @@ func parseYamlModels(projectRoot string, projYaml DbtProjectYaml) (map[string]Mo
 		for _, file := range files {
 			dbtYml := parsePropertiesYamlFile(file)
 			for _, model := range dbtYml.Models {
+				columns := make([]ColumnProperties, len(model.Columns))
+				for i, column := range model.Columns {
+					column.Description.Value = replaceDescriptionDocsBlocks(column.Description.Value, docsMap)
+					columns[i] = column
+				}
 				modelMap[model.Name.Value] = ModelProperties{
 					Name:        model.Name,
 					Description: AnnotatedField[string]{Value: replaceDescriptionDocsBlocks(model.Description.Value, docsMap)},
@@ -226,6 +238,7 @@ func parseYamlModels(projectRoot string, projYaml DbtProjectYaml) (map[string]Mo
 							},
 						},
 					},
+					Columns:   columns,
 					SchemaURI: file,
 				}
 			}

@@ -3,11 +3,13 @@ package analysis
 import (
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/j-clemons/dbt-language-server/docs"
 	"github.com/j-clemons/dbt-language-server/lsp"
 	"github.com/j-clemons/dbt-language-server/testutils"
+	"github.com/j-clemons/dbt-language-server/util"
 )
 
 func expectedTestState() State {
@@ -15,6 +17,11 @@ func expectedTestState() State {
 	if err != nil {
 		panic(err)
 	}
+	docsMd, err := util.ReadFileContents(filepath.Join(testdataRoot, "models/docs.md"))
+	if err != nil {
+		panic(err)
+	}
+	ordersStatusDoc := getDocsFileContents(docsMd)[0].Content
 
 	expectedState := State{
 		Documents: map[string]Document{},
@@ -113,6 +120,15 @@ func expectedTestState() State {
 						Start: lsp.Position{Line: 3, Character: 10},
 						End:   lsp.Position{Line: 3, Character: 10},
 					},
+					Columns: []Column{
+						{Name: "customer_id", Description: "This is a unique identifier for a customer"},
+						{Name: "first_name", Description: "Customer's first name. PII."},
+						{Name: "last_name", Description: "Customer's last name. PII."},
+						{Name: "first_order", Description: "Date (UTC) of a customer's first order"},
+						{Name: "most_recent_order", Description: "Date (UTC) of a customer's most recent order"},
+						{Name: "number_of_orders", Description: "Count of the number of orders a customer has placed"},
+						{Name: "total_order_amount", Description: "Total value (AUD) of a customer's orders"},
+					},
 				},
 				"orders": {
 					URI:         filepath.Join(testdataRoot, "models/orders.sql"),
@@ -122,6 +138,17 @@ func expectedTestState() State {
 					SchemaRange: lsp.Range{
 						Start: lsp.Position{Line: 31, Character: 10},
 						End:   lsp.Position{Line: 31, Character: 10},
+					},
+					Columns: []Column{
+						{Name: "order_id", Description: "This is a unique identifier for an order"},
+						{Name: "customer_id", Description: "Foreign key to the customers table"},
+						{Name: "order_date", Description: "Date (UTC) that the order was placed"},
+						{Name: "status", Description: ordersStatusDoc},
+						{Name: "amount", Description: "Total amount (AUD) of the order"},
+						{Name: "credit_card_amount", Description: "Amount of the order (AUD) paid for by credit card"},
+						{Name: "coupon_amount", Description: "Amount of the order (AUD) paid for by coupon"},
+						{Name: "bank_transfer_amount", Description: "Amount of the order (AUD) paid for by bank transfer"},
+						{Name: "gift_card_amount", Description: "Amount of the order (AUD) paid for by gift card"},
 					},
 				},
 				"stg_customer_status": {
@@ -143,6 +170,7 @@ func expectedTestState() State {
 						Start: lsp.Position{Line: 3, Character: 10},
 						End:   lsp.Position{Line: 3, Character: 10},
 					},
+					Columns: []Column{{Name: "customer_id"}},
 				},
 				"stg_orders": {
 					URI:         filepath.Join(testdataRoot, "models/staging/stg_orders.sql"),
@@ -153,6 +181,7 @@ func expectedTestState() State {
 						Start: lsp.Position{Line: 10, Character: 10},
 						End:   lsp.Position{Line: 10, Character: 10},
 					},
+					Columns: []Column{{Name: "order_id"}, {Name: "status"}},
 				},
 				"stg_payments": {
 					URI:         filepath.Join(testdataRoot, "models/staging/stg_payments.sql"),
@@ -163,6 +192,7 @@ func expectedTestState() State {
 						Start: lsp.Position{Line: 21, Character: 10},
 						End:   lsp.Position{Line: 21, Character: 10},
 					},
+					Columns: []Column{{Name: "payment_id"}, {Name: "payment_method"}},
 				},
 				"raw_customers": {
 					URI:         filepath.Join(testdataRoot, "seeds/raw_customers.csv"),
@@ -382,5 +412,44 @@ func BenchmarkRefreshDbtContext(b *testing.B) {
 
 		state := NewState()
 		state.refreshDbtContext(testdataRoot)
+	}
+}
+
+func TestHoverRef(t *testing.T) {
+	testdataRoot, err := testutils.GetTestdataPath("jaffle_shop_duckdb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := NewState()
+	state.refreshDbtContext(testdataRoot)
+
+	uri := "file://" + filepath.Join(testdataRoot, "models/customers.sql")
+	state.parseDocument(uri, "select * from {{ ref('orders') }}")
+	// cursor inside 'orders'
+	got := state.Hover(1, uri, lsp.Position{Line: 0, Character: 24}).Result.Contents
+
+	for _, want := range []string{
+		"**orders** · jaffle_shop",
+		"This table has basic information about orders",
+		"| column | type | description |",
+		"| `order_id` |  | This is a unique identifier for an order |",
+		// multi-line doc block collapses to its first line
+		"| `status` |  | Orders can be one of the following statuses: |",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("hover missing %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "| placed") {
+		t.Fatalf("hover leaked doc-block table rows into a cell:\n%s", got)
+	}
+
+	// Unknown model: no hover content, and definition must not resolve.
+	state.parseDocument(uri, "select * from {{ ref('nope') }}")
+	if got := state.Hover(2, uri, lsp.Position{Line: 0, Character: 24}).Result.Contents; got != "" {
+		t.Fatalf("expected empty hover for unknown model, got %q", got)
+	}
+	if def := state.Definition(3, uri, lsp.Position{Line: 0, Character: 24}); def.Result.URI != uri {
+		t.Fatalf("expected definition to stay on the current document, got %q", def.Result.URI)
 	}
 }

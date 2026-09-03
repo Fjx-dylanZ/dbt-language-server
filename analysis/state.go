@@ -218,7 +218,7 @@ func (s *State) Hover(id int, uri string, position lsp.Position) lsp.HoverRespon
 
 	switch cursorToken.Type {
 	case parser.REF:
-		response.Result.Contents = s.DbtContext.ModelDetailMap[cursorToken.Literal].Description
+		response.Result.Contents = modelHoverMarkdown(cursorToken.Literal, s.DbtContext.ModelDetailMap[cursorToken.Literal])
 	case parser.SOURCE:
 		response.Result.Contents = s.DbtContext.SourceDetailMap[cursorToken.Literal].Description
 	case parser.SOURCE_TABLE:
@@ -286,7 +286,7 @@ func (s *State) Definition(id int, uri string, position lsp.Position) lsp.Defini
 	switch cursorToken.Type {
 	case parser.REF:
 		model := s.DbtContext.ModelDetailMap[cursorToken.Literal]
-		if model != (ModelDetails{}) {
+		if model.URI != "" {
 			response.Result.URI = "file://" + model.URI
 			response.Result.Range = lsp.Range{
 				Start: lsp.Position{

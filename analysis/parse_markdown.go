@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -13,10 +14,11 @@ type Docs struct {
 	Content string
 }
 
-func getDocsFiles(dbtProjectYaml DbtProjectYaml) []string {
+func getDocsFiles(projectRoot string, dbtProjectYaml DbtProjectYaml) []string {
 	docsFiles := []string{}
 
-	for _, path := range dbtProjectYaml.DocsPaths.Value {
+	for _, p := range dbtProjectYaml.DocsPaths.Value {
+		path := filepath.Join(projectRoot, p)
 		_, err := os.ReadDir(path)
 		if err != nil {
 			continue
