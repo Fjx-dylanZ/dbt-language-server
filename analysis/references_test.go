@@ -117,3 +117,88 @@ func TestReferencesRef(t *testing.T) {
 		t.Fatalf("references (open doc) =\n%+v\nwant\n%+v", got, want)
 	}
 }
+
+func TestDefinitionMacroInStatementBlock(t *testing.T) {
+	state, uri, root := openCustomersModel(t)
+	macros := "file://" + filepath.Join(root, "macros/jaffle_macros.sql")
+
+	// Nested call inside a {% set %} block: both calls resolve.
+	state.parseDocument(uri, "{%- set v = times_five(full_name('a', 'b')) %}")
+	if got := state.Definition(1, uri, lsp.Position{Line: 0, Character: 14}).Result; got.URI != macros || got.Range.Start.Line != 6 {
+		t.Fatalf("times_five definition = %+v", got)
+	}
+	if got := state.Definition(2, uri, lsp.Position{Line: 0, Character: 26}).Result; got.URI != macros || got.Range.Start.Line != 0 {
+		t.Fatalf("full_name definition = %+v", got)
+	}
+	if got := state.Hover(3, uri, lsp.Position{Line: 0, Character: 26}).Result.Contents; got != "full_name(first_name, last_name)" {
+		t.Fatalf("full_name hover = %q", got)
+	}
+}
+
+func TestReferencesMacro(t *testing.T) {
+	state, uri, root := openCustomersModel(t)
+	macros := "file://" + filepath.Join(root, "macros/jaffle_macros.sql")
+
+	// From a call site in customers.sql (line 61) and from the definition itself.
+	macroDoc, err := util.ReadFileContents(filepath.Join(root, "macros/jaffle_macros.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.parseDocument(macros, macroDoc)
+
+	want := []lsp.Location{
+		span(macros, 0, 9, 18),
+		span(uri, 60, 11, 20),
+	}
+	for _, at := range []struct {
+		uri string
+		pos lsp.Position
+	}{
+		{uri, lsp.Position{Line: 60, Character: 14}},
+		{macros, lsp.Position{Line: 0, Character: 12}},
+	} {
+		got := state.References(1, at.uri, at.pos, true).Result
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("references from %s %+v =\n%+v\nwant\n%+v", at.uri, at.pos, got, want)
+		}
+		got = state.References(2, at.uri, at.pos, false).Result
+		if !reflect.DeepEqual(got, want[1:]) {
+			t.Fatalf("references (no decl) from %s %+v =\n%+v\nwant\n%+v", at.uri, at.pos, got, want[1:])
+		}
+	}
+
+	// Package macro called with its qualifier: jaffle_package.add_values on line 67.
+	pkgMacros := "file://" + filepath.Join(root, "dbt_packages/jaffle_package/macros/jaffle_package_macros.sql")
+	got := state.References(3, uri, lsp.Position{Line: 66, Character: 30}, true).Result
+	want = []lsp.Location{
+		span(pkgMacros, 0, 9, 19),
+		span(uri, 66, 26, 36),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("package macro references =\n%+v\nwant\n%+v", got, want)
+	}
+
+	// Built-ins are not project macros: nothing.
+	state.parseDocument(uri, "{% if is_incremental() %} select 1 {% endif %}")
+	if got := state.References(4, uri, lsp.Position{Line: 0, Character: 8}, true).Result; len(got) != 0 {
+		t.Fatalf("expected no references for a built-in, got %+v", got)
+	}
+}
+
+func TestReferencesIgnoreJinjaComments(t *testing.T) {
+	state, uri, root := openCustomersModel(t)
+	ordersModel := "file://" + filepath.Join(root, "models/orders.sql")
+
+	// Examples inside `{# … #}` are not rendered by dbt and must not count.
+	state.parseDocument(uri, "{# usage: {{ full_name('a', 'b') }} from {{ ref('stg_orders') }} #}\n{{ full_name('c', 'd') }} {{ ref('stg_orders') }}")
+
+	got := state.References(1, uri, lsp.Position{Line: 1, Character: 5}, false).Result
+	if want := []lsp.Location{span(uri, 1, 3, 12)}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("macro references =\n%+v\nwant\n%+v", got, want)
+	}
+
+	got = state.References(2, uri, lsp.Position{Line: 1, Character: 36}, false).Result
+	if want := []lsp.Location{span(uri, 1, 34, 44), span(ordersModel, 4, 26, 36)}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ref references =\n%+v\nwant\n%+v", got, want)
+	}
+}

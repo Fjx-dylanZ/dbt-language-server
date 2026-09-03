@@ -14,6 +14,7 @@ type Parser struct {
 	peekTok Token
 	tokens  []TokenLL
 	ctes    CTE
+	inJinja bool // inside `{{ … }}` or `{% … %}`
 }
 
 type CTE struct {
@@ -149,6 +150,9 @@ func (p *Parser) parseVar() {
 	}
 }
 
+// parseMacro is called with curTok on an IDENT inside a Jinja block and marks
+// `name(` as MACRO and `pkg.name(` as PACKAGE DOT MACRO. Built-ins such as
+// is_incremental() are marked too; they simply resolve to nothing.
 func (p *Parser) parseMacro() {
 	if p.peekTok.Type == DOT {
 		p.curTok.Type = PACKAGE
@@ -184,15 +188,6 @@ func (p *Parser) parseSource() {
 				}
 			}
 		}
-	}
-}
-
-func (p *Parser) parseConfig() {
-	p.NextToken()
-	if p.curTok.Type == LPAREN {
-		p.incParenCount()
-		// Parse config parameters - we'll mark the config function call
-		// and let the rest of the parsing handle the parameters normally
 	}
 }
 
@@ -236,18 +231,14 @@ func (p *Parser) parseTokens() {
 			p.parseRef()
 		case VAR:
 			p.parseVar()
-		case DB_LBRACE:
-			switch p.peekTok.Type {
-			case CONFIG:
-				p.NextToken()
-				p.parseConfig()
-			case IDENT:
-				p.NextToken()
+		case IDENT:
+			if p.inJinja {
 				p.parseMacro()
 			}
-		case JINJA_LBRACE:
-		case DB_RBRACE:
-		case JINJA_RBRACE:
+		case DB_LBRACE, JINJA_LBRACE:
+			p.inJinja = true
+		case DB_RBRACE, JINJA_RBRACE:
+			p.inJinja = false
 		}
 		p.NextToken()
 	}

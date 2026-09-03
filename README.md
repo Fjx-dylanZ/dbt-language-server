@@ -17,7 +17,7 @@ LSP for dbt
 | CTEs | x | x |   |   |
 | Sources | x |   | x | x |
 | Seeds | x |   | x | x |
-| Macros | x |   | x | x |
+| Macros | x | x | x | x |
 | Variables | x |   | x | x |
 | Functions |   |   | x | x |
 
