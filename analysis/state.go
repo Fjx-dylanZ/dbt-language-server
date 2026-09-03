@@ -333,18 +333,9 @@ func (s *State) Definition(id int, uri string, position lsp.Position) lsp.Defini
 		}
 	default:
 		response.Result.URI = uri
-		defToken := s.Documents[uri].DefTokens[cursorToken.Literal]
-		if defToken != (parser.Token{}) {
-			response.Result.Range = lsp.Range{
-				Start: lsp.Position{
-					Line:      defToken.Line,
-					Character: defToken.Column,
-				},
-				End: lsp.Position{
-					Line:      defToken.Line,
-					Character: defToken.Column,
-				},
-			}
+		defToken, ok := s.Documents[uri].DefTokens[strings.ToLower(cursorToken.Literal)]
+		if ok {
+			response.Result.Range = tokenRange(defToken)
 		}
 	}
 

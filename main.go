@@ -153,6 +153,22 @@ func handleMessage(logger *log.Logger, writer io.Writer, state *analysis.State, 
 		response := state.Definition(request.ID, request.Params.TextDocument.URI, request.Params.Position)
 
 		util.WriteResponse(writer, response)
+	case "textDocument/references":
+		logger.Print("textDocument/references")
+		var request lsp.ReferencesRequest
+		if err := json.Unmarshal(contents, &request); err != nil {
+			logger.Printf("textDocument/references: %s", err)
+			return
+		}
+
+		response := state.References(
+			request.ID,
+			request.Params.TextDocument.URI,
+			request.Params.Position,
+			request.Params.Context.IncludeDeclaration,
+		)
+
+		util.WriteResponse(writer, response)
 	case "textDocument/completion":
 		logger.Print("textDocument/completion")
 		var request lsp.CompletionRequest

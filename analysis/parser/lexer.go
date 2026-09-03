@@ -153,13 +153,56 @@ func isDigit(ch byte) bool {
 	return '0' <= ch && ch <= '9'
 }
 
+// skipWhitespace skips whitespace and comments (`-- …`, `/* … */`, `{# … #}`).
+// Comments are dropped so that parentheses inside them cannot corrupt CTE
+// paren tracking in the parser.
 func (l *Lexer) skipWhitespace() {
-	for l.ch == ' ' || l.ch == '\t' || l.ch == '\n' || l.ch == '\r' {
-		if l.ch == '\n' || l.ch == '\r' {
-			l.line++
-			l.column = -1
+	for {
+		switch {
+		case l.ch == ' ' || l.ch == '\t':
+			l.readChar()
+		case l.ch == '\n' || l.ch == '\r':
+			l.newline()
+		case l.ch == '-' && l.peekChar() == '-':
+			for l.ch != '\n' && l.ch != '\r' && l.ch != 0 {
+				l.readChar()
+			}
+		case l.ch == '/' && l.peekChar() == '*':
+			l.skipBlockComment('*', '/')
+		case l.ch == '{' && l.peekChar() == '#':
+			l.skipBlockComment('#', '}')
+		default:
+			return
 		}
+	}
+}
+
+// newline consumes a line terminator (`\n`, `\r`, or `\r\n`) and advances the line counter once.
+func (l *Lexer) newline() {
+	if l.ch == '\r' && l.peekChar() == '\n' {
 		l.readChar()
+	}
+	l.line++
+	l.column = -1
+	l.readChar()
+}
+
+// skipBlockComment consumes from the current two-byte opener through the
+// two-byte closer `end0 end1`, or to EOF if unterminated.
+func (l *Lexer) skipBlockComment(end0, end1 byte) {
+	l.readChar()
+	l.readChar()
+	for l.ch != 0 {
+		switch {
+		case l.ch == end0 && l.peekChar() == end1:
+			l.readChar()
+			l.readChar()
+			return
+		case l.ch == '\n' || l.ch == '\r':
+			l.newline()
+		default:
+			l.readChar()
+		}
 	}
 }
 

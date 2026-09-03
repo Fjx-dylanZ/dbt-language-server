@@ -32,6 +32,7 @@ type ServerCapabilities struct {
 
 	HoverProvider          bool                  `json:"hoverProvider"`
 	DefinitionProvider     bool                  `json:"definitionProvider"`
+	ReferencesProvider     bool                  `json:"referencesProvider"`
 	CompletionProvider     map[string]any        `json:"completionProvider"`
 	ExecuteCommandProvider ExecuteCommandOptions `json:"executeCommandProvider"`
 }
@@ -56,6 +57,7 @@ func NewInitializeResponse(id int) InitializeResponse {
 				TextDocumentSync:   2,
 				HoverProvider:      true,
 				DefinitionProvider: true,
+				ReferencesProvider: true,
 				CompletionProvider: map[string]any{},
 				ExecuteCommandProvider: ExecuteCommandOptions{
 					Commands: []string{"dbt.goToSchema"},

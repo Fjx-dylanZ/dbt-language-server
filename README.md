@@ -7,17 +7,19 @@ LSP for dbt
 - **Code Completion**
 - **Hover Information**
 - **Go to Definition**
+- **Find References**
 - **[Go to Schema](analysis/README.md)**
 - **Function Documentation**
 
-| Resource | Go to Definition | Hover | Completion |
-| --- | --- | --- | --- |
-| Model References | x | x | x |
-| Sources | x | x | x |
-| Seeds | x | x | x |
-| Macros | x | x | x |
-| Variables | x | x | x |
-| Functions |   | x | x |
+| Resource | Go to Definition | Find References | Hover | Completion |
+| --- | --- | --- | --- | --- |
+| Model References | x | x | x | x |
+| CTEs | x | x |   |   |
+| Sources | x |   | x | x |
+| Seeds | x |   | x | x |
+| Macros | x |   | x | x |
+| Variables | x |   | x | x |
+| Functions |   |   | x | x |
 
 ### Function Documentation
 This is the only part of the LSP that is dialect specific. The rest is parsed 

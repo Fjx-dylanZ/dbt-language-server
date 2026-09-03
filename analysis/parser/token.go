@@ -1,6 +1,10 @@
 package parser
 
-import "github.com/j-clemons/dbt-language-server/docs"
+import (
+	"strings"
+
+	"github.com/j-clemons/dbt-language-server/docs"
+)
 
 type TokenType string
 
@@ -365,21 +369,41 @@ var duckdbKeywords = map[string]TokenType{
 	"with":         WITH,
 }
 
+// coreKeywords are recognised for every dialect (including an unresolved one):
+// they are the structural keywords the parser relies on for CTE tracking.
+var coreKeywords = map[string]TokenType{
+	"as":        AS,
+	"recursive": RECURSIVE,
+	"with":      WITH,
+}
+
+// dbtKeywords are Jinja/Python identifiers and therefore case-sensitive.
+var dbtKeywords = map[string]TokenType{
+	"ref":    REF,
+	"var":    VAR,
+	"source": SOURCE,
+	"config": CONFIG,
+}
+
 func LookupIdent(ident string, dialect docs.Dialect) TokenType {
-	keywords := map[string]TokenType{}
+	if tok, ok := dbtKeywords[ident]; ok {
+		return tok
+	}
+
+	// SQL keywords are case-insensitive.
+	lower := strings.ToLower(ident)
+
+	var keywords map[string]TokenType
 	switch dialect {
 	case "snowflake":
 		keywords = snowflakeKeywords
 	case "duckdb":
 		keywords = duckdbKeywords
 	}
-
-	// dbt keywords
-	keywords["ref"] = REF
-	keywords["var"] = VAR
-	keywords["source"] = SOURCE
-	keywords["config"] = CONFIG
-	if tok, ok := keywords[ident]; ok {
+	if tok, ok := keywords[lower]; ok {
+		return tok
+	}
+	if tok, ok := coreKeywords[lower]; ok {
 		return tok
 	}
 	return IDENT

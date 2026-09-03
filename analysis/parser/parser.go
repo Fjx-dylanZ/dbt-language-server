@@ -3,6 +3,7 @@ package parser
 import (
 	"errors"
 	"sort"
+	"strings"
 
 	"github.com/j-clemons/dbt-language-server/docs"
 )
@@ -63,16 +64,60 @@ func (p *Parser) NextToken() Token {
 
 func (p *Parser) parseWith() {
 	p.NextToken()
-	if p.curTok.Type == IDENT {
-		p.ctes.Ind = true
-		p.ctes.Tokens = append(p.ctes.Tokens, p.curTok)
-		if p.peekTok.Type == AS {
-			p.NextToken()
-		}
-		if p.peekTok.Type == LPAREN {
-			p.ctes.ParenCount = 1
-		}
+	if p.curTok.Type == RECURSIVE {
 		p.NextToken()
+	}
+	p.demoteBareDbtKeyword()
+	if p.curTok.Type == IDENT {
+		p.parseCteHead()
+	}
+}
+
+// demoteBareDbtKeyword retypes ref/source/var/config to IDENT when they are
+// not a call: `with source as (…)` and `from source` name a CTE, not dbt's source().
+func (p *Parser) demoteBareDbtKeyword() {
+	switch p.curTok.Type {
+	case REF, VAR, SOURCE, CONFIG:
+		if p.peekTok.Type != LPAREN {
+			p.curTok.Type = IDENT
+		}
+	}
+}
+
+// parseCteHead is called with curTok on a candidate CTE name. It accepts
+// `name [(col, …)] [as] (` and, on success, records the name, arms paren
+// tracking and leaves curTok on the body's opening paren. Anything else
+// (e.g. BigQuery's `unnest(x) with offset as pos`) is not a CTE.
+func (p *Parser) parseCteHead() {
+	name := p.curTok
+	if p.peekTok.Type == LPAREN {
+		p.NextToken()
+		p.skipParenGroup()
+	}
+	if p.peekTok.Type == AS {
+		p.NextToken()
+	}
+	if p.peekTok.Type != LPAREN {
+		p.ctes.Ind = false
+		return
+	}
+	p.ctes.Ind = true
+	p.ctes.ParenCount = 1
+	p.ctes.Tokens = append(p.ctes.Tokens, name)
+	p.NextToken()
+}
+
+// skipParenGroup is called with curTok on LPAREN and advances to the matching RPAREN.
+func (p *Parser) skipParenGroup() {
+	depth := 1
+	for depth > 0 && p.peekTok.Type != EOF {
+		p.NextToken()
+		switch p.curTok.Type {
+		case LPAREN:
+			depth++
+		case RPAREN:
+			depth--
+		}
 	}
 }
 
@@ -165,6 +210,7 @@ func (p *Parser) decParenCount() {
 
 func (p *Parser) parseTokens() {
 	for p.curTok.Type != EOF {
+		p.demoteBareDbtKeyword()
 		switch p.curTok.Type {
 		case WITH:
 			p.parseWith()
@@ -176,8 +222,9 @@ func (p *Parser) parseTokens() {
 				p.NextToken()
 				if p.curTok.Type == COMMA {
 					p.NextToken()
+					p.demoteBareDbtKeyword()
 					if p.curTok.Type == IDENT {
-						p.ctes.Tokens = append(p.ctes.Tokens, p.curTok)
+						p.parseCteHead()
 					}
 				} else {
 					p.ctes.Ind = false
@@ -206,20 +253,24 @@ func (p *Parser) parseTokens() {
 	}
 }
 
+// CreateTokenNameMap maps each CTE name (lower-cased: SQL identifiers are
+// case-insensitive) to the token that defines it.
 func (p *Parser) CreateTokenNameMap() map[string]Token {
-	tokenMap := make(map[string]Token)
+	tokenMap := make(map[string]Token, len(p.ctes.Tokens))
 	for _, token := range p.ctes.Tokens {
-		tokenMap[token.Literal] = token
+		tokenMap[strings.ToLower(token.Literal)] = token
 	}
 	return tokenMap
 }
 
 type TokenIndex struct {
+	tokens     []TokenLL
 	lineTokens map[int][]TokenLL
 }
 
 func (p *Parser) CreateTokenIndex() *TokenIndex {
 	index := &TokenIndex{
+		tokens:     p.tokens,
 		lineTokens: make(map[int][]TokenLL),
 	}
 
@@ -228,6 +279,27 @@ func (p *Parser) CreateTokenIndex() *TokenIndex {
 	}
 
 	return index
+}
+
+// IdentifierReferences returns, in document order, every IDENT token that
+// names `name` (case-insensitive) in a relation position: qualified columns
+// (`x.name`), quoted strings (`'name'`) and aliases (`… as name`) are skipped.
+func (ti *TokenIndex) IdentifierReferences(name string) []Token {
+	var refs []Token
+	for i := range ti.tokens {
+		t := &ti.tokens[i]
+		if t.Token.Type != IDENT || !strings.EqualFold(t.Token.Literal, name) {
+			continue
+		}
+		if prev := t.PrevToken; prev != nil {
+			switch prev.Token.Type {
+			case DOT, SINGLE_QUOTE, DOUBLE_QUOTE, BACKTICK, AS:
+				continue
+			}
+		}
+		refs = append(refs, t.Token)
+	}
+	return refs
 }
 
 func (ti *TokenIndex) FindTokenAtCursor(line, column int) (*TokenLL, error) {
