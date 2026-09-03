@@ -33,6 +33,7 @@ type ServerCapabilities struct {
 	HoverProvider          bool                  `json:"hoverProvider"`
 	DefinitionProvider     bool                  `json:"definitionProvider"`
 	ReferencesProvider     bool                  `json:"referencesProvider"`
+	SignatureHelpProvider  SignatureHelpOptions  `json:"signatureHelpProvider"`
 	CompletionProvider     map[string]any        `json:"completionProvider"`
 	ExecuteCommandProvider ExecuteCommandOptions `json:"executeCommandProvider"`
 }
@@ -58,6 +59,9 @@ func NewInitializeResponse(id int) InitializeResponse {
 				HoverProvider:      true,
 				DefinitionProvider: true,
 				ReferencesProvider: true,
+				SignatureHelpProvider: SignatureHelpOptions{
+					TriggerCharacters: []string{"(", ","},
+				},
 				CompletionProvider: map[string]any{},
 				ExecuteCommandProvider: ExecuteCommandOptions{
 					Commands: []string{"dbt.goToSchema"},

@@ -10,18 +10,16 @@ LSP for dbt
 - **Find References**
 - **[Go to Schema](analysis/README.md)**
 - **Function Documentation**
-
-| Resource | Go to Definition | Find References | Hover | Completion |
-| --- | --- | --- | --- | --- |
-| Model References | x | x | x | x |
-| CTEs | x | x |   |   |
-| Jinja variables (`set`, `for`, macro parameters) | x | x |   |   |
-| Sources | x |   | x | x |
-| Seeds | x |   | x | x |
-| Macros | x | x | x | x |
-| Variables | x |   | x | x |
-| Functions |   |   | x | x |
-
+| Resource | Go to Definition | Find References | Hover | Completion | Signature Help |
+| --- | --- | --- | --- | --- | --- |
+| Model References | x | x | x | x |   |
+| CTEs | x | x |   |   |   |
+| Jinja variables (`set`, `for`, macro parameters) | x | x |   |   |   |
+| Sources | x |   | x | x |   |
+| Seeds | x |   | x | x |   |
+| Macros | x | x | x | x | x |
+| Variables | x |   | x | x |   |
+| Functions |   |   | x | x | x |
 ### Function Documentation
 This is the only part of the LSP that is dialect specific. The rest is parsed 
 using the file system and a very forgiving parser that is primarily focused on 
@@ -30,6 +28,15 @@ dbt specific syntax instead of attempting to be a full SQL parser.
 Supported Dialects:
 - Snowflake
 - BigQuery
+
+The dialect is the adapter `type` of the profile's default target, read from the
+first `profiles.yml` found in dbt's own lookup order: `$DBT_PROFILES_DIR`, the
+project root, then `~/.dbt`.
+
+Hover (`textDocument/hover`) on a function shows its documentation; signature
+help (`textDocument/signatureHelp`, triggered on `(` and `,`) shows the call
+form with the argument under the cursor highlighted, for dialect functions and
+project macros alike.
 
 ### dbt Fusion Static Analysis
 If you have dbt fusion installed, you can use it for static analysis and the 

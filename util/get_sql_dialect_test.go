@@ -106,3 +106,35 @@ func TestGetDialect_DefaultProfilesDir(t *testing.T) {
 		t.Errorf("Expected dialect 'postgres', got '%s'", dialect)
 	}
 }
+
+func writeProfiles(t *testing.T, dir, body string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "profiles.yml"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// dbt reads profiles.yml from the project directory before ~/.dbt.
+func TestGetDialect_ProjectRoot(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("DBT_PROFILES_DIR", "")
+	writeProfiles(t, filepath.Join(home, ".dbt"), "p:\n  target: dev\n  outputs:\n    dev:\n      type: postgres\n")
+	writeProfiles(t, root, "p:\n  target: \"{{ env_var('DBT_TARGET', 'prod') }}\"\n  outputs:\n    prod:\n      type: bigquery\n")
+
+	if got := GetDialect("p", root); got != "bigquery" {
+		t.Fatalf("project-root profiles.yml should win over ~/.dbt, got %q", got)
+	}
+
+	// $DBT_PROFILES_DIR beats the project root even when a root is given.
+	custom := t.TempDir()
+	writeProfiles(t, custom, "p:\n  target: dev\n  outputs:\n    dev:\n      type: snowflake\n")
+	t.Setenv("DBT_PROFILES_DIR", custom)
+	if got := GetDialect("p", root); got != "snowflake" {
+		t.Fatalf("DBT_PROFILES_DIR should win over the project root, got %q", got)
+	}
+}

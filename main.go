@@ -169,6 +169,17 @@ func handleMessage(logger *log.Logger, writer io.Writer, state *analysis.State, 
 		)
 
 		util.WriteResponse(writer, response)
+	case "textDocument/signatureHelp":
+		logger.Print("textDocument/signatureHelp")
+		var request lsp.SignatureHelpRequest
+		if err := json.Unmarshal(contents, &request); err != nil {
+			logger.Printf("textDocument/signatureHelp: %s", err)
+			return
+		}
+
+		response := state.SignatureHelp(request.ID, request.Params.TextDocument.URI, request.Params.Position)
+
+		util.WriteResponse(writer, response)
 	case "textDocument/completion":
 		logger.Print("textDocument/completion")
 		var request lsp.CompletionRequest

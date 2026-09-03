@@ -73,7 +73,7 @@ func (s *State) refreshDbtContext(wd string) {
 	s.DbtContext.ProjectRoot = util.GetProjectRoot("dbt_project.yml", wd)
 
 	s.DbtContext.ProjectYaml = parseDbtProjectYaml(s.DbtContext.ProjectRoot)
-	s.DbtContext.Dialect = util.GetDialect(s.DbtContext.ProjectYaml.Profile.Value, wd)
+	s.DbtContext.Dialect = util.GetDialect(s.DbtContext.ProjectYaml.Profile.Value, s.DbtContext.ProjectRoot)
 
 	var wg sync.WaitGroup
 	wg.Add(3)
@@ -216,8 +216,6 @@ func (s *State) Hover(id int, uri string, position lsp.Position) lsp.HoverRespon
 
 	cursorToken := cursorTokenLL.Token
 
-	dialectFunctions := s.DbtContext.Dialect.FunctionDocs()
-
 	switch cursorToken.Type {
 	case parser.REF:
 		response.Result.Contents = modelHoverMarkdown(cursorToken.Literal, s.DbtContext.ModelDetailMap[cursorToken.Literal])
@@ -251,7 +249,7 @@ func (s *State) Hover(id int, uri string, position lsp.Position) lsp.HoverRespon
 		}
 		response.Result.Contents = s.DbtContext.MacroDetailMap[packageName][cursorToken.Literal].Description
 	default:
-		response.Result.Contents = dialectFunctions[cursorToken.Literal]
+		response.Result.Contents, _ = s.functionDoc(*cursorTokenLL)
 	}
 
 	return response
