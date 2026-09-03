@@ -21,14 +21,14 @@ func TestParseSignatureBigQuery(t *testing.T) {
 		params []string
 		doc    string
 	}{
-		{"date_trunc", "DATE_TRUNC(date_value, date_granularity)", []string{"date_value", "date_granularity"}, "Description\nTruncates"},
-		{"count", "COUNT(*)\n[ OVER over_clause ]", []string{"*"}, "Description\nGets the number of rows"},
-		{"coalesce", "COALESCE(expr[, ...])", []string{"expr[, ...]"}, "Description\nReturns the value of the first non-NULL"},
-		{"safe_cast", "SAFE_CAST(expression AS typename [format_clause])", []string{"expression AS typename [format_clause]"}, "Description\nWhen using CAST"},
-		{"appends", "APPENDS(\n  TABLE table,\n  start_timestamp DEFAULT NULL,\n  end_timestamp DEFAULT NULL)", []string{"TABLE table", "start_timestamp DEFAULT NULL", "end_timestamp DEFAULT NULL"}, "Description\nThe APPENDS function"},
+		{"date_trunc", "DATE_TRUNC(date_value, date_granularity)", []string{"date_value", "date_granularity"}, "**Description**\nTruncates"},
+		{"count", "COUNT(*)\n[ OVER over_clause ]", []string{"*"}, "**Description**\nGets the number of rows"},
+		{"coalesce", "COALESCE(expr[, ...])", []string{"expr[, ...]"}, "**Description**\nReturns the value of the first non-NULL"},
+		{"safe_cast", "SAFE_CAST(expression AS typename [format_clause])", []string{"expression AS typename [format_clause]"}, "**Description**\nWhen using CAST"},
+		{"appends", "APPENDS(\n  TABLE table,\n  start_timestamp DEFAULT NULL,\n  end_timestamp DEFAULT NULL)", []string{"TABLE table", "start_timestamp DEFAULT NULL", "end_timestamp DEFAULT NULL"}, "**Description**\nThe APPENDS function"},
 	}
 	for _, tt := range tests {
-		sig, ok := ParseSignature(BigQueryFunctions[tt.fn])
+		sig, ok := ParseSignature(Markdown(BigQueryFunctions[tt.fn]))
 		if !ok {
 			t.Fatalf("%s: no signature", tt.fn)
 		}

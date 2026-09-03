@@ -84,20 +84,19 @@ func (s *State) calleeSignature(t parser.TokenLL) (docs.Signature, bool) {
 // BigQuery's `safe.` prefix is transparent (`safe.substr` → `substr`); any other
 // unknown prefix is a table alias, so `t.date` is a column, not DATE().
 func (s *State) functionDoc(t parser.TokenLL) (string, bool) {
-	functions := s.DbtContext.Dialect.FunctionDocs()
+	dialect := s.DbtContext.Dialect
 	name := strings.ToLower(t.Token.Literal)
 	if match, _ := t.TokenLookbackMatch(parser.DOT, 1); match {
 		prefix := ""
 		if p := t.PrevToken.PrevToken; p != nil {
 			prefix = strings.ToLower(p.Token.Literal)
 		}
-		if doc, ok := functions[prefix+"."+name]; ok {
+		if doc, ok := dialect.FunctionDoc(prefix + "." + name); ok {
 			return doc, true
 		}
 		if prefix != "safe" {
 			return "", false
 		}
 	}
-	doc, ok := functions[name]
-	return doc, ok
+	return dialect.FunctionDoc(name)
 }

@@ -431,13 +431,26 @@ func TestHoverRef(t *testing.T) {
 	for _, want := range []string{
 		"**orders** · jaffle_shop",
 		"This table has basic information about orders",
-		"| column | type | description |",
-		"| `order_id` |  | This is a unique identifier for an order |",
+		// no column declares data_type, so there is no type column; cells are padded
+		"| column                 | description                                         |",
+		"| ---------------------- | --------------------------------------------------- |",
+		"| `order_id`             | This is a unique identifier for an order            |",
 		// multi-line doc block collapses to its first line
-		"| `status` |  | Orders can be one of the following statuses: |",
+		"| `status`               | Orders can be one of the following statuses:        |",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("hover missing %q in:\n%s", want, got)
+		}
+	}
+	width := 0
+	for _, line := range strings.Split(got, "\n") {
+		if !strings.HasPrefix(line, "|") {
+			continue
+		}
+		if width == 0 {
+			width = len(line)
+		} else if len(line) != width {
+			t.Fatalf("table rows are not aligned:\n%s", got)
 		}
 	}
 	if strings.Contains(got, "| placed") {

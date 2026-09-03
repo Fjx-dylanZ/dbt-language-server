@@ -18,6 +18,15 @@ func (d Dialect) FunctionDocs() map[string]string {
 	}
 }
 
+// FunctionDoc returns the markdown documentation of a dialect function.
+func (d Dialect) FunctionDoc(name string) (string, bool) {
+	doc, ok := d.FunctionDocs()[name]
+	if !ok {
+		return "", false
+	}
+	return Markdown(doc), true
+}
+
 func (d Dialect) FunctionCompletionItems() []lsp.CompletionItem {
 	items := []lsp.CompletionItem{}
 
@@ -27,7 +36,7 @@ func (d Dialect) FunctionCompletionItems() []lsp.CompletionItem {
 		items = append(items, lsp.CompletionItem{
 			Label:         k,
 			Detail:        "",
-			Documentation: v,
+			Documentation: Markdown(v),
 			Kind:          completionKind.Function,
 			InsertText:    k,
 			SortText:      k,
