@@ -408,3 +408,13 @@ func LookupIdent(ident string, dialect docs.Dialect) TokenType {
 	}
 	return IDENT
 }
+
+// LookupJinjaIdent classifies an identifier inside a Jinja block: only the dbt
+// calls are keywords there; SQL keywords (`join`, `order`, `set`, …) are ordinary
+// Jinja names.
+func LookupJinjaIdent(ident string) TokenType {
+	if tok, ok := dbtKeywords[ident]; ok {
+		return tok
+	}
+	return IDENT
+}

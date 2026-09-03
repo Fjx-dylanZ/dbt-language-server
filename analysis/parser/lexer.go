@@ -15,6 +15,7 @@ type Lexer struct {
 	line    int
 	column  int
 	dialect docs.Dialect
+	jinja   bool // inside `{{ … }}` or `{% … %}`, where SQL keywords are plain identifiers
 }
 
 func New(input string, dialect docs.Dialect) *Lexer {
@@ -88,8 +89,14 @@ func (l *Lexer) NextToken() Token {
 		tok = l.twoCharToken('=', GT_EQ, GT)
 	case '{':
 		tok = l.handleLeftBrace()
+		if tok.Type == DB_LBRACE || tok.Type == JINJA_LBRACE {
+			l.jinja = true
+		}
 	case '}':
 		tok = l.twoCharToken('}', DB_RBRACE, RBRACE)
+		if tok.Type == DB_RBRACE {
+			l.jinja = false
+		}
 	case '\'':
 		tok = newToken(SINGLE_QUOTE, *l)
 	case '"':
@@ -98,6 +105,9 @@ func (l *Lexer) NextToken() Token {
 		tok = newToken(BACKTICK, *l)
 	case '%':
 		tok = l.twoCharToken('}', JINJA_RBRACE, PERCENT)
+		if tok.Type == JINJA_RBRACE {
+			l.jinja = false
+		}
 	case 0:
 		tok.Literal = ""
 		tok.Type = EOF
@@ -106,7 +116,11 @@ func (l *Lexer) NextToken() Token {
 			tok.Line = l.line
 			tok.Column = l.column // record column at start of token
 			tok.Literal = l.readIdentifier()
-			tok.Type = LookupIdent(tok.Literal, l.dialect)
+			if l.jinja {
+				tok.Type = LookupJinjaIdent(tok.Literal)
+			} else {
+				tok.Type = LookupIdent(tok.Literal, l.dialect)
+			}
 			return tok
 		} else if isDigit(l.ch) {
 			tok.Line = l.line

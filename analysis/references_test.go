@@ -202,3 +202,47 @@ func TestReferencesIgnoreJinjaComments(t *testing.T) {
 		t.Fatalf("ref references =\n%+v\nwant\n%+v", got, want)
 	}
 }
+
+func TestDefinitionAndReferencesJinjaVariable(t *testing.T) {
+	state, uri, _ := openCustomersModel(t)
+	state.parseDocument(uri, `{% macro bq_consumer(user_email_expr) -%}
+    {%- set airflow_principals = var('bq_airflow_principals', [
+        '694223719049-compute@developer.gserviceaccount.com',
+    ]) -%}
+    case
+        when {{ bq_principal_in(user_email_expr, airflow_principals) }} then 'airflow'
+    end
+{%- endmacro %}
+{{ airflow_principals }}`)
+
+	def := span(uri, 1, 12, 30)
+	use := span(uri, 5, 49, 67)
+
+	// gd from the use and from the definition itself.
+	for _, pos := range []lsp.Position{{Line: 5, Character: 55}, {Line: 1, Character: 15}} {
+		if got := state.Definition(1, uri, pos).Result; got != def {
+			t.Fatalf("definition from %+v = %+v, want %+v", pos, got, def)
+		}
+	}
+	// The macro parameter resolves to the signature.
+	if got := state.Definition(2, uri, lsp.Position{Line: 5, Character: 35}).Result; got != span(uri, 0, 21, 36) {
+		t.Fatalf("parameter definition = %+v", got)
+	}
+
+	got := state.References(3, uri, lsp.Position{Line: 5, Character: 55}, true).Result
+	if want := []lsp.Location{def, use}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("references =\n%+v\nwant\n%+v", got, want)
+	}
+	got = state.References(4, uri, lsp.Position{Line: 5, Character: 55}, false).Result
+	if want := []lsp.Location{use}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("references (no decl) =\n%+v\nwant\n%+v", got, want)
+	}
+
+	// Outside the macro the name is undefined: no definition, no references.
+	if got := state.Definition(5, uri, lsp.Position{Line: 8, Character: 5}).Result; got != span(uri, 8, 5, 5) {
+		t.Fatalf("expected the cursor to stay put outside the scope, got %+v", got)
+	}
+	if got := state.References(6, uri, lsp.Position{Line: 8, Character: 5}, true).Result; len(got) != 0 {
+		t.Fatalf("expected no references outside the scope, got %+v", got)
+	}
+}

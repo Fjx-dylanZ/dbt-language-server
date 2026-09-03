@@ -48,7 +48,7 @@ select * from users`
 		{Type: IDENT, Literal: "materialized", Line: 0, Column: 10},
 		{Type: EQUAL, Literal: "=", Line: 0, Column: 22},
 		{Type: SINGLE_QUOTE, Literal: "'", Line: 0, Column: 23},
-		{Type: TABLE, Literal: "table", Line: 0, Column: 24},
+		{Type: IDENT, Literal: "table", Line: 0, Column: 24}, // SQL keywords are identifiers inside Jinja
 		{Type: SINGLE_QUOTE, Literal: "'", Line: 0, Column: 29}, {Type: COMMA, Literal: ",", Line: 0, Column: 30},
 		{Type: IDENT, Literal: "unique_key", Line: 0, Column: 32},
 		{Type: EQUAL, Literal: "=", Line: 0, Column: 42},
@@ -209,7 +209,7 @@ select * from {{ ref('users') }}`
 
 	expected := []Token{
 		{Type: JINJA_LBRACE, Literal: "{%", Line: 0, Column: 0},
-		{Type: SET, Literal: "set", Line: 0, Column: 3},
+		{Type: IDENT, Literal: "set", Line: 0, Column: 3}, // SQL keywords are identifiers inside Jinja
 		{Type: IDENT, Literal: "v", Line: 0, Column: 7},
 		{Type: EQUAL, Literal: "=", Line: 0, Column: 9},
 		{Type: VAR, Literal: "var", Line: 0, Column: 11},

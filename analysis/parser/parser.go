@@ -14,7 +14,9 @@ type Parser struct {
 	peekTok Token
 	tokens  []TokenLL
 	ctes    CTE
-	inJinja bool // inside `{{ … }}` or `{% … %}`
+	inJinja bool      // inside `{{ … }}` or `{% … %}`
+	quote   TokenType // the quote that opened the current Jinja string literal, else ""
+	jinja   JinjaVars
 }
 
 type CTE struct {
@@ -27,6 +29,7 @@ type CTE struct {
 type TokenLL struct {
 	Token     Token
 	PrevToken *TokenLL
+	Jinja     bool // inside a Jinja block and outside its string literals
 }
 
 func NewParser(input string, dialect docs.Dialect) *Parser {
@@ -37,6 +40,7 @@ func NewParser(input string, dialect docs.Dialect) *Parser {
 			ParenCount: -1,
 			Tokens:     []Token{},
 		},
+		jinja: JinjaVars{Global: map[string]Token{}},
 	}
 }
 
@@ -52,9 +56,19 @@ func (p *Parser) NextToken() Token {
 		if len(p.tokens) > 0 {
 			prevToken = &p.tokens[len(p.tokens)-1]
 		}
+		// Every token passes through here exactly once, so string parity holds
+		// even for quotes consumed by parseRef/parseSource/parseVar.
+		if p.inJinja && (p.curTok.Type == SINGLE_QUOTE || p.curTok.Type == DOUBLE_QUOTE) {
+			if p.quote == "" {
+				p.quote = p.curTok.Type
+			} else if p.quote == p.curTok.Type {
+				p.quote = ""
+			}
+		}
 		p.tokens = append(p.tokens, TokenLL{
 			Token:     p.curTok,
 			PrevToken: prevToken,
+			Jinja:     p.inJinja && p.quote == "",
 		})
 	}
 
@@ -206,6 +220,10 @@ func (p *Parser) decParenCount() {
 func (p *Parser) parseTokens() {
 	for p.curTok.Type != EOF {
 		p.demoteBareDbtKeyword()
+		if p.inJinja && p.quote == "" && p.parseJinjaStatement() {
+			p.NextToken()
+			continue
+		}
 		switch p.curTok.Type {
 		case WITH:
 			p.parseWith()
@@ -232,11 +250,12 @@ func (p *Parser) parseTokens() {
 		case VAR:
 			p.parseVar()
 		case IDENT:
-			if p.inJinja {
+			if p.inJinja && p.quote == "" {
 				p.parseMacro()
 			}
 		case DB_LBRACE, JINJA_LBRACE:
 			p.inJinja = true
+			p.quote = ""
 		case DB_RBRACE, JINJA_RBRACE:
 			p.inJinja = false
 		}

@@ -20,6 +20,8 @@ func tokenRange(t parser.Token) lsp.Range {
 
 // References answers textDocument/references.
 //   - On a CTE name: every use of that CTE within the current document.
+//   - On a Jinja variable (`{% set %}`, `{% for %}` target, macro parameter):
+//     every use within its scope in the current document.
 //   - On a ref('model') argument: every ref() of that model across the project.
 //   - On a macro call: every call of that macro across the project.
 //
@@ -57,12 +59,23 @@ func (s *State) References(id int, uri string, position lsp.Position, includeDec
 		}
 		response.Result = s.macroReferences(macro, includeDeclaration)
 	case parser.IDENT:
-		defToken, ok := doc.DefTokens[strings.ToLower(cursorToken.Literal)]
-		if !ok {
-			return response
+		var def parser.Token
+		var refs []parser.Token
+		if cursorTokenLL.Jinja {
+			d, ok := doc.Jinja.Resolve(cursorToken)
+			if !ok {
+				return response
+			}
+			def, refs = d, doc.Jinja.References(doc.Tokens, d)
+		} else {
+			d, ok := doc.DefTokens[strings.ToLower(cursorToken.Literal)]
+			if !ok {
+				return response
+			}
+			def, refs = d, doc.Tokens.IdentifierReferences(d.Literal)
 		}
-		for _, t := range doc.Tokens.IdentifierReferences(defToken.Literal) {
-			if !includeDeclaration && t == defToken {
+		for _, t := range refs {
+			if !includeDeclaration && t == def {
 				continue
 			}
 			response.Result = append(response.Result, lsp.Location{URI: uri, Range: tokenRange(t)})

@@ -15,6 +15,7 @@ LSP for dbt
 | --- | --- | --- | --- | --- |
 | Model References | x | x | x | x |
 | CTEs | x | x |   |   |
+| Jinja variables (`set`, `for`, macro parameters) | x | x |   |   |
 | Sources | x |   | x | x |
 | Seeds | x |   | x | x |
 | Macros | x | x | x | x |

@@ -26,6 +26,7 @@ type Document struct {
 	Text      string
 	Tokens    *parser.TokenIndex
 	DefTokens map[string]parser.Token
+	Jinja     parser.JinjaVars
 }
 
 type DbtContext struct {
@@ -111,6 +112,7 @@ func (s *State) parseDocument(uri, text string) {
 		Text:      text,
 		Tokens:    parserIns.CreateTokenIndex(),
 		DefTokens: parserIns.CreateTokenNameMap(),
+		Jinja:     parserIns.CreateJinjaVars(),
 	}
 }
 
@@ -333,8 +335,12 @@ func (s *State) Definition(id int, uri string, position lsp.Position) lsp.Defini
 		}
 	default:
 		response.Result.URI = uri
-		defToken, ok := s.Documents[uri].DefTokens[strings.ToLower(cursorToken.Literal)]
-		if ok {
+		doc := s.Documents[uri]
+		if cursorTokenLL.Jinja {
+			if def, ok := doc.Jinja.Resolve(cursorToken); ok {
+				response.Result.Range = tokenRange(def)
+			}
+		} else if defToken, ok := doc.DefTokens[strings.ToLower(cursorToken.Literal)]; ok {
 			response.Result.Range = tokenRange(defToken)
 		}
 	}
