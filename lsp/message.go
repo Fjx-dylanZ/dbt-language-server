@@ -17,6 +17,13 @@ type Response struct {
 	// Error
 }
 
+// ShutdownResponse carries an explicit `"result": null`; clients (e.g. Neovim)
+// reject a response that has neither `result` nor `error`.
+type ShutdownResponse struct {
+	Response
+	Result any `json:"result"`
+}
+
 type Notification struct {
 	RPC    string `json:"jsonrpc"`
 	Method string `json:"method"`

@@ -188,9 +188,11 @@ func handleMessage(logger *log.Logger, writer io.Writer, state *analysis.State, 
 		}
 
 		logger.Print("Received shutdown request")
-		response := lsp.Response{
-			RPC: "2.0",
-			ID:  &request.ID,
+		response := lsp.ShutdownResponse{
+			Response: lsp.Response{
+				RPC: "2.0",
+				ID:  &request.ID,
+			},
 		}
 		util.WriteResponse(writer, response)
 	case "exit":
