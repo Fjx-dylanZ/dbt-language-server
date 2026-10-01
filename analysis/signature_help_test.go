@@ -20,7 +20,7 @@ func TestSignatureHelp(t *testing.T) {
 	}, "\n"))
 
 	help := func(line, character int) *lsp.SignatureHelp {
-		return state.SignatureHelp(1, uri, lsp.Position{Line: line, Character: character}).Result
+		return state.SignatureHelp(nil, uri, lsp.Position{Line: line, Character: character}).Result
 	}
 	label := func(h *lsp.SignatureHelp, p int) string {
 		span := h.Signatures[0].Parameters[p].Label
@@ -69,7 +69,7 @@ func TestHoverFunction(t *testing.T) {
 	state.parseDocument(uri, "select DATE_TRUNC(t.date, day), net.host(u), safe.substr(s, 1), o.substr from t")
 
 	hover := func(character int) string {
-		return state.Hover(1, uri, lsp.Position{Line: 0, Character: character}).Result.Contents
+		return state.Hover(nil, uri, lsp.Position{Line: 0, Character: character}).Result.Contents
 	}
 	if got := hover(9); !strings.HasPrefix(got, "```sql\nDATE_TRUNC(") {
 		t.Fatalf("upper-case function: %q", got)

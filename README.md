@@ -10,6 +10,7 @@ LSP for dbt
 - **Find References**
 - **[Go to Schema](analysis/README.md)**
 - **Function Documentation**
+- **[Diagnostics](#diagnostics)**
 | Resource | Go to Definition | Find References | Hover | Completion | Signature Help |
 | --- | --- | --- | --- | --- | --- |
 | Model References | x | x | x | x |   |
@@ -38,9 +39,33 @@ help (`textDocument/signatureHelp`, triggered on `(` and `,`) shows the call
 form with the argument under the cursor highlighted, for dialect functions and
 project macros alike.
 
+### Diagnostics
+Every `ref()` and `source()` call whose arguments are plain string literals is
+checked against the project, without running dbt:
+- `ref('name')` must name a model, seed or snapshot in the project or an
+  installed package. Versioned models count under their YAML name.
+- `ref('package', 'name')` must name one in that package. Packages that are
+  not installed (e.g. dbt Mesh projects) are skipped.
+- `source('source', 'table')` must name a declared source and one of its tables.
+
+Calls with computed arguments, such as `ref('stg_' ~ name)`, are not checked.
+Outside a dbt project nothing is reported.
+
+Clients that support pull diagnostics (`textDocument/diagnostic`) request them.
+Other clients get `textDocument/publishDiagnostics` tagged with the document
+version: for that document when it changes, and for every open document when
+one is opened or saved, since the project is read again then. Pull clients
+that accept `workspace/diagnostic/refresh` are sent it at the same points.
+Closing a document clears its diagnostics.
+
+The project is also read once at startup (`initialized`). Clients that accept
+server-initiated progress see this as `$/progress` begin and end. Some clients,
+such as omp, wait for that before their first diagnostics request.
+
 ### dbt Fusion Static Analysis
 If you have dbt fusion installed, you can use it for static analysis and the 
-results from compilation will be returned as diagnostics in the editor.
+results from compilation will be returned as diagnostics in the editor, after
+the `ref()`/`source()` checks above. Fusion compiles a file when it is opened or saved.
 All artifacts from the compilation will be written to a separate directory from 
 the project you are editing.
 

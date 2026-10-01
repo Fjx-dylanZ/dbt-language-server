@@ -11,7 +11,7 @@ func TestUpdateDocumentIncremental(t *testing.T) {
 	uri := "test://document.sql"
 	initialText := "SELECT * FROM table1\nWHERE id = 1"
 
-	state.OpenDocument(uri, initialText)
+	state.OpenDocument(uri, initialText, 1)
 
 	if state.Documents[uri].Text != initialText {
 		t.Errorf("Expected initial text to be %q, got %q", initialText, state.Documents[uri].Text)
@@ -27,7 +27,7 @@ func TestUpdateDocumentIncremental(t *testing.T) {
 		},
 	}
 
-	state.UpdateDocumentIncremental(uri, changes)
+	state.UpdateDocumentIncremental(uri, 2, changes)
 
 	expectedText := "SELECT * FROM table1\nWHERE id = 2"
 	if state.Documents[uri].Text != expectedText {
@@ -97,7 +97,7 @@ func TestFullDocumentReplacement(t *testing.T) {
 	uri := "test://document.sql"
 	initialText := "SELECT * FROM table1"
 
-	state.OpenDocument(uri, initialText)
+	state.OpenDocument(uri, initialText, 1)
 
 	changes := []lsp.TextDocumentContentChangeEvent{
 		{
@@ -106,7 +106,7 @@ func TestFullDocumentReplacement(t *testing.T) {
 		},
 	}
 
-	state.UpdateDocumentIncremental(uri, changes)
+	state.UpdateDocumentIncremental(uri, 2, changes)
 
 	expectedText := "SELECT * FROM table2"
 	if state.Documents[uri].Text != expectedText {

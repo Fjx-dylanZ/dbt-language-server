@@ -2,12 +2,16 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"os"
 	"os/exec"
+	"slices"
+	"strconv"
 
 	flag "github.com/spf13/pflag"
 
@@ -85,8 +89,8 @@ func handleMessage(logger *log.Logger, writer io.Writer, state *analysis.State, 
 	switch method {
 	case "initialize":
 		var request lsp.InitializeRequest
-		if err := json.Unmarshal(contents, &request); err != nil {
-			logger.Printf("Could not parse: %s", err)
+		if !decodeRequest(logger, writer, method, contents, &request) {
+			return
 		}
 
 		logger.Printf("Connected to: %s %s %s",
@@ -95,11 +99,42 @@ func handleMessage(logger *log.Logger, writer io.Writer, state *analysis.State, 
 			request.Params.RootPath,
 		)
 
-		msg := lsp.NewInitializeResponse(request.ID)
-		util.WriteResponse(writer, msg)
+		capabilities := request.Params.Capabilities
 		state.LspClientRootPath = request.Params.RootPath
+		state.PullDiagnostics = capabilities.TextDocument.Diagnostic != nil
+		state.DiagnosticRefresh = capabilities.Workspace.Diagnostics.RefreshSupport
+		state.WorkDoneProgress = capabilities.Window.WorkDoneProgress
 
+		util.WriteResponse(writer, lsp.NewInitializeResponse(request.ID, state.PullDiagnostics))
 		logger.Print("Sent the reply")
+	case "initialized":
+		// Read the project up front. A client that accepts server-initiated
+		// progress is first asked for a token, and the reading is reported on it
+		// once the client replies: some clients (e.g. omp) hold project-wide
+		// requests such as diagnostics until that progress ends.
+		if state.WorkDoneProgress {
+			util.WriteResponse(writer, lsp.NewWorkDoneProgressCreateRequest(loadProjectRequestID, loadProjectToken))
+			return
+		}
+		state.LoadProject()
+	case "":
+		// A client's reply to a server request. Only the progress token request
+		// needs handling; refresh replies carry nothing.
+		var reply struct {
+			ID    lsp.ID             `json:"id"`
+			Error *lsp.ResponseError `json:"error"`
+		}
+		if err := json.Unmarshal(contents, &reply); err != nil || !bytes.Equal(reply.ID, loadProjectRequestID) {
+			return
+		}
+		if reply.Error != nil {
+			logger.Printf("No progress token: %s", reply.Error.Message)
+			state.LoadProject()
+			return
+		}
+		util.WriteResponse(writer, lsp.NewProgressNotification(loadProjectToken, "begin", "Reading dbt project"))
+		state.LoadProject()
+		util.WriteResponse(writer, lsp.NewProgressNotification(loadProjectToken, "end", ""))
 	case "textDocument/didOpen":
 		var request lsp.DidOpenTextDocumentNotification
 		if err := json.Unmarshal(contents, &request); err != nil {
@@ -107,10 +142,13 @@ func handleMessage(logger *log.Logger, writer io.Writer, state *analysis.State, 
 			return
 		}
 
-		state.OpenDocument(request.Params.TextDocument.URI, request.Params.TextDocument.Text)
-		logger.Printf("Opened: %s", request.Params.TextDocument.URI)
+		uri := request.Params.TextDocument.URI
+		state.OpenDocument(uri, request.Params.TextDocument.Text, request.Params.TextDocument.Version)
+		logger.Printf("Opened: %s", uri)
 
-		fusion.FusionCompile(state, request.Params.TextDocument.URI, logger, writer)
+		state.SetFusionDiagnostics(uri, fusion.FusionCompile(state, uri, logger))
+		// Opening re-reads the project, which can change any open document's results.
+		diagnosticsChanged(writer, state)
 	case "textDocument/didSave":
 		logger.Print("textDocument/didSave")
 		var request lsp.DidSaveTextDocumentNotification
@@ -119,10 +157,12 @@ func handleMessage(logger *log.Logger, writer io.Writer, state *analysis.State, 
 			return
 		}
 
-		logger.Printf("Saved: %s", request.Params.TextDocument.URI)
-		state.SaveDocument(request.Params.TextDocument.URI)
+		uri := request.Params.TextDocument.URI
+		logger.Printf("Saved: %s", uri)
+		state.SaveDocument(uri)
 
-		fusion.FusionCompile(state, request.Params.TextDocument.URI, logger, writer)
+		state.SetFusionDiagnostics(uri, fusion.FusionCompile(state, uri, logger))
+		diagnosticsChanged(writer, state)
 	case "textDocument/didChange":
 		var request lsp.TextDocumentDidChangeNotification
 		if err := json.Unmarshal(contents, &request); err != nil {
@@ -130,12 +170,34 @@ func handleMessage(logger *log.Logger, writer io.Writer, state *analysis.State, 
 			return
 		}
 
-		logger.Printf("Changed: %s", request.Params.TextDocument.URI)
-		state.UpdateDocumentIncremental(request.Params.TextDocument.URI, request.Params.ContentChanges)
+		uri := request.Params.TextDocument.URI
+		logger.Printf("Changed: %s", uri)
+		state.UpdateDocumentIncremental(uri, request.Params.TextDocument.Version, request.Params.ContentChanges)
+		publishDiagnostics(writer, state, uri)
+	case "textDocument/didClose":
+		var request lsp.DidCloseTextDocumentNotification
+		if err := json.Unmarshal(contents, &request); err != nil {
+			logger.Printf("textDocument/didClose: %s", err)
+			return
+		}
+
+		uri := request.Params.TextDocument.URI
+		logger.Printf("Closed: %s", uri)
+		state.CloseDocument(uri)
+		if !state.PullDiagnostics {
+			util.WriteResponse(writer, lsp.NewDiagnosticsNotification(uri, nil, nil))
+		}
+	case "textDocument/diagnostic":
+		var request lsp.DocumentDiagnosticRequest
+		if !decodeRequest(logger, writer, method, contents, &request) {
+			return
+		}
+
+		diagnostics := state.Diagnostics(request.Params.TextDocument.URI)
+		util.WriteResponse(writer, lsp.NewDocumentDiagnosticResponse(request.ID, diagnostics))
 	case "textDocument/hover":
 		var request lsp.HoverRequest
-		if err := json.Unmarshal(contents, &request); err != nil {
-			logger.Printf("textDocument/hover: %s", err)
+		if !decodeRequest(logger, writer, method, contents, &request) {
 			return
 		}
 
@@ -145,8 +207,7 @@ func handleMessage(logger *log.Logger, writer io.Writer, state *analysis.State, 
 	case "textDocument/definition":
 		logger.Print("textDocument/definition")
 		var request lsp.DefinitionRequest
-		if err := json.Unmarshal(contents, &request); err != nil {
-			logger.Printf("textDocument/definition: %s", err)
+		if !decodeRequest(logger, writer, method, contents, &request) {
 			return
 		}
 
@@ -156,8 +217,7 @@ func handleMessage(logger *log.Logger, writer io.Writer, state *analysis.State, 
 	case "textDocument/references":
 		logger.Print("textDocument/references")
 		var request lsp.ReferencesRequest
-		if err := json.Unmarshal(contents, &request); err != nil {
-			logger.Printf("textDocument/references: %s", err)
+		if !decodeRequest(logger, writer, method, contents, &request) {
 			return
 		}
 
@@ -172,8 +232,7 @@ func handleMessage(logger *log.Logger, writer io.Writer, state *analysis.State, 
 	case "textDocument/signatureHelp":
 		logger.Print("textDocument/signatureHelp")
 		var request lsp.SignatureHelpRequest
-		if err := json.Unmarshal(contents, &request); err != nil {
-			logger.Printf("textDocument/signatureHelp: %s", err)
+		if !decodeRequest(logger, writer, method, contents, &request) {
 			return
 		}
 
@@ -183,8 +242,7 @@ func handleMessage(logger *log.Logger, writer io.Writer, state *analysis.State, 
 	case "textDocument/completion":
 		logger.Print("textDocument/completion")
 		var request lsp.CompletionRequest
-		if err := json.Unmarshal(contents, &request); err != nil {
-			logger.Printf("textDocument/completion: %s", err)
+		if !decodeRequest(logger, writer, method, contents, &request) {
 			return
 		}
 
@@ -193,8 +251,7 @@ func handleMessage(logger *log.Logger, writer io.Writer, state *analysis.State, 
 		util.WriteResponse(writer, response)
 	case "shutdown":
 		var request lsp.Request
-		if err := json.Unmarshal(contents, &request); err != nil {
-			logger.Printf("shutdown: %s", err)
+		if !decodeRequest(logger, writer, method, contents, &request) {
 			return
 		}
 
@@ -202,7 +259,7 @@ func handleMessage(logger *log.Logger, writer io.Writer, state *analysis.State, 
 		response := lsp.ShutdownResponse{
 			Response: lsp.Response{
 				RPC: "2.0",
-				ID:  &request.ID,
+				ID:  request.ID,
 			},
 		}
 		util.WriteResponse(writer, response)
@@ -212,30 +269,105 @@ func handleMessage(logger *log.Logger, writer io.Writer, state *analysis.State, 
 	case "workspace/executeCommand":
 		logger.Print("workspace/executeCommand")
 		var request lsp.ExecuteCommandRequest
-		if err := json.Unmarshal(contents, &request); err != nil {
-			logger.Printf("workspace/executeCommand: %s", err)
+		if !decodeRequest(logger, writer, method, contents, &request) {
 			return
 		}
 
-		if request.Params.Command == "dbt.goToSchema" {
-			// Parse arguments to get URI and position
-			if len(request.Params.Arguments) >= 1 {
-				argMap, ok := request.Params.Arguments[0].(map[string]interface{})
-				if ok {
-					uri, _ := argMap["uri"].(string)
-					positionMap, _ := argMap["position"].(map[string]interface{})
-					line, _ := positionMap["line"].(float64)
-					character, _ := positionMap["character"].(float64)
-
-					position := lsp.Position{
-						Line:      int(line),
-						Character: int(character),
-					}
-
-					response := state.GoToSchema(request.ID, uri, position)
-					util.WriteResponse(writer, response)
-				}
+		switch command := request.Params.Command; command {
+		case "dbt.goToSchema":
+			var params lsp.GoToSchemaParams
+			if len(request.Params.Arguments) == 0 ||
+				json.Unmarshal(request.Params.Arguments[0], &params) != nil ||
+				params.URI == "" {
+				logger.Printf("%s: bad arguments %s", command, request.Params.Arguments)
+				util.WriteResponse(writer, lsp.NewErrorResponse(request.ID, lsp.InvalidParams,
+					"dbt.goToSchema expects an argument {uri, position}"))
+				return
 			}
+
+			response := state.GoToSchema(request.ID, params.URI, params.Position)
+			util.WriteResponse(writer, response)
+		default:
+			logger.Printf("Unknown command: %s", command)
+			util.WriteResponse(writer, lsp.NewErrorResponse(request.ID, lsp.InvalidParams,
+				fmt.Sprintf("Unknown command: %s", command)))
 		}
+	default:
+		// JSON-RPC requires a reply to every request; notifications (no id)
+		// must not be answered.
+		id := requestID(contents)
+		if id == nil {
+			return
+		}
+		logger.Printf("Method not found: %s", method)
+		util.WriteResponse(writer, lsp.NewErrorResponse(id, lsp.MethodNotFound, "Method not found: "+method))
 	}
+}
+
+// decodeRequest unmarshals a request into v. When that fails it answers with
+// InvalidParams, so the client is not left waiting, and returns false.
+func decodeRequest(logger *log.Logger, writer io.Writer, method string, contents []byte, v any) bool {
+	err := json.Unmarshal(contents, v)
+	if err == nil {
+		return true
+	}
+
+	logger.Printf("%s: %s", method, err)
+	if id := requestID(contents); id != nil {
+		util.WriteResponse(writer, lsp.NewErrorResponse(id, lsp.InvalidParams,
+			fmt.Sprintf("Invalid params for %s: %s", method, err)))
+	}
+	return false
+}
+
+// requestID returns a message's id exactly as sent, or nil when it has none.
+func requestID(contents []byte) lsp.ID {
+	var message struct {
+		ID lsp.ID `json:"id"`
+	}
+	if err := json.Unmarshal(contents, &message); err != nil {
+		return nil
+	}
+	return message.ID
+}
+
+// loadProjectRequestID is the id of the window/workDoneProgress/create request
+// sent on `initialized`; the client's reply starts the project reading.
+var loadProjectRequestID = lsp.ID(`"load-project"`)
+
+const loadProjectToken = "dbt-language-server/load-project"
+
+// serverRequestID numbers the other requests the server sends to the client.
+var serverRequestID int
+
+// diagnosticsChanged reports that every open document's diagnostics may have
+// changed: pull clients are asked to pull again, push clients get them.
+func diagnosticsChanged(writer io.Writer, state *analysis.State) {
+	if state.PullDiagnostics {
+		if state.DiagnosticRefresh {
+			serverRequestID++
+			util.WriteResponse(writer, lsp.Request{
+				RPC:    "2.0",
+				ID:     lsp.ID(strconv.Itoa(serverRequestID)),
+				Method: "workspace/diagnostic/refresh",
+			})
+		}
+		return
+	}
+
+	for _, uri := range slices.Sorted(maps.Keys(state.Documents)) {
+		publishDiagnostics(writer, state, uri)
+	}
+}
+
+// publishDiagnostics pushes an open document's diagnostics, tagged with the
+// version they were computed for. Pull clients ask for them instead.
+func publishDiagnostics(writer io.Writer, state *analysis.State, uri string) {
+	doc, ok := state.Documents[uri]
+	if state.PullDiagnostics || !ok {
+		return
+	}
+
+	version := doc.Version
+	util.WriteResponse(writer, lsp.NewDiagnosticsNotification(uri, &version, state.Diagnostics(uri)))
 }

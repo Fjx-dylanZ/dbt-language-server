@@ -22,9 +22,12 @@ type ProjectDetails struct {
 	DbtProjectYaml DbtProjectYaml
 }
 
-func (s *State) getModelDetails() (map[string]ModelDetails, map[string]Source) {
+// getModelDetails also returns, per project, every name ref() resolves:
+// model files, versioned models (declared in YAML only), seeds and snapshots.
+func (s *State) getModelDetails() (map[string]ModelDetails, map[string]Source, map[string]map[string]bool) {
 	modelMap := make(map[string]ModelDetails)
 	sourceMap := make(map[string]Source)
+	refNames := make(map[string]map[string]bool)
 
 	packageDetails := getPackageModelDetails(s.DbtContext.ProjectRoot, s.DbtContext.ProjectYaml)
 
@@ -40,8 +43,29 @@ func (s *State) getModelDetails() (map[string]ModelDetails, map[string]Source) {
 		modelPathMap := createModelPathMap(p.RootPath, p.DbtProjectYaml)
 		modelSchemaDetails, projectSourceMap := parseYamlModels(p.RootPath, p.DbtProjectYaml)
 
-		for k, v := range projectSourceMap {
-			sourceMap[k] = v
+		for _, v := range projectSourceMap {
+			addSource(sourceMap, v)
+		}
+
+		projectName := p.DbtProjectYaml.ProjectName.Value
+		names := refNames[projectName]
+		if names == nil {
+			names = make(map[string]bool)
+			refNames[projectName] = names
+		}
+		for k := range modelPathMap {
+			names[k] = true
+		}
+		for k, v := range modelSchemaDetails {
+			if len(v.Versions) > 0 {
+				names[k] = true
+			}
+		}
+		for k := range createSeedPathMap(p.RootPath, p.DbtProjectYaml) {
+			names[k] = true
+		}
+		for _, k := range snapshotNames(p.RootPath, p.DbtProjectYaml) {
+			names[k] = true
 		}
 
 		for k, v := range modelPathMap {
@@ -97,5 +121,5 @@ func (s *State) getModelDetails() (map[string]ModelDetails, map[string]Source) {
 			SchemaRange: lsp.Range{},
 		}
 	}
-	return modelMap, sourceMap
+	return modelMap, sourceMap, refNames
 }

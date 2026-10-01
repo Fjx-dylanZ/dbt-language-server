@@ -380,6 +380,14 @@ func expectedTestState() State {
 					},
 				},
 			},
+			RefNames: map[string]map[string]bool{
+				"jaffle_shop": {
+					"customers": true, "orders": true,
+					"stg_customers": true, "stg_orders": true, "stg_payments": true,
+					"raw_customers": true, "raw_orders": true, "raw_payments": true,
+				},
+				"jaffle_package": {"stg_customer_status": true},
+			},
 		},
 		FusionEnabled: false,
 	}
@@ -426,7 +434,7 @@ func TestHoverRef(t *testing.T) {
 	uri := "file://" + filepath.Join(testdataRoot, "models/customers.sql")
 	state.parseDocument(uri, "select * from {{ ref('orders') }}")
 	// cursor inside 'orders'
-	got := state.Hover(1, uri, lsp.Position{Line: 0, Character: 24}).Result.Contents
+	got := state.Hover(nil, uri, lsp.Position{Line: 0, Character: 24}).Result.Contents
 
 	for _, want := range []string{
 		"**orders** · jaffle_shop",
@@ -459,10 +467,10 @@ func TestHoverRef(t *testing.T) {
 
 	// Unknown model: no hover content, and definition must not resolve.
 	state.parseDocument(uri, "select * from {{ ref('nope') }}")
-	if got := state.Hover(2, uri, lsp.Position{Line: 0, Character: 24}).Result.Contents; got != "" {
+	if got := state.Hover(nil, uri, lsp.Position{Line: 0, Character: 24}).Result.Contents; got != "" {
 		t.Fatalf("expected empty hover for unknown model, got %q", got)
 	}
-	if def := state.Definition(3, uri, lsp.Position{Line: 0, Character: 24}); def.Result.URI != uri {
+	if def := state.Definition(nil, uri, lsp.Position{Line: 0, Character: 24}); def.Result.URI != uri {
 		t.Fatalf("expected definition to stay on the current document, got %q", def.Result.URI)
 	}
 }

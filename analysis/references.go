@@ -26,11 +26,11 @@ func tokenRange(t parser.Token) lsp.Range {
 //   - On a macro call: every call of that macro across the project.
 //
 // Other tokens yield an empty list.
-func (s *State) References(id int, uri string, position lsp.Position, includeDeclaration bool) lsp.ReferencesResponse {
+func (s *State) References(id lsp.ID, uri string, position lsp.Position, includeDeclaration bool) lsp.ReferencesResponse {
 	response := lsp.ReferencesResponse{
 		Response: lsp.Response{
 			RPC: "2.0",
-			ID:  &id,
+			ID:  id,
 		},
 		Result: []lsp.Location{},
 	}

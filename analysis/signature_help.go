@@ -12,11 +12,11 @@ import (
 // around the cursor: a dialect function (from the docs table) or a project
 // macro (its `{% macro name(params) %}` head), with the argument under the
 // cursor marked active.
-func (s *State) SignatureHelp(id int, uri string, position lsp.Position) lsp.SignatureHelpResponse {
+func (s *State) SignatureHelp(id lsp.ID, uri string, position lsp.Position) lsp.SignatureHelpResponse {
 	response := lsp.SignatureHelpResponse{
 		Response: lsp.Response{
 			RPC: "2.0",
-			ID:  &id,
+			ID:  id,
 		},
 	}
 

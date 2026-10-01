@@ -20,9 +20,19 @@ type State struct {
 	FusionEnabled     bool
 	FusionPath        string
 	LspClientRootPath string
+	// FusionDiagnostics holds the latest dbt Fusion compile results per document URI.
+	FusionDiagnostics map[string][]lsp.Diagnostic
+	// PullDiagnostics is set when the client pulls diagnostics with
+	// textDocument/diagnostic; otherwise they are pushed.
+	PullDiagnostics bool
+	// DiagnosticRefresh is set when the client accepts workspace/diagnostic/refresh.
+	DiagnosticRefresh bool
+	// WorkDoneProgress is set when the client accepts server-initiated progress.
+	WorkDoneProgress bool
 }
 
 type Document struct {
+	Version   int
 	Text      string
 	Tokens    *parser.TokenIndex
 	DefTokens map[string]parser.Token
@@ -37,6 +47,9 @@ type DbtContext struct {
 	SourceDetailMap   map[string]Source
 	MacroDetailMap    map[Package]map[string]Macro
 	VariableDetailMap map[string]Variable
+	// RefNames maps each project name (the root project and installed
+	// packages) to the names ref() resolves in it: models, seeds and snapshots.
+	RefNames map[string]map[string]bool
 }
 
 func NewState() State {
@@ -50,6 +63,7 @@ func NewState() State {
 			SourceDetailMap:   map[string]Source{},
 			MacroDetailMap:    map[Package]map[string]Macro{},
 			VariableDetailMap: map[string]Variable{},
+			RefNames:          map[string]map[string]bool{},
 		},
 		FusionEnabled:     false,
 		FusionPath:        "",
@@ -80,12 +94,13 @@ func (s *State) refreshDbtContext(wd string) {
 
 	var modelMap map[string]ModelDetails
 	var sourceMap map[string]Source
+	var refNames map[string]map[string]bool
 	var macroMap map[Package]map[string]Macro
 	var varMap map[string]Variable
 
 	go func() {
 		defer wg.Done()
-		modelMap, sourceMap = s.getModelDetails()
+		modelMap, sourceMap, refNames = s.getModelDetails()
 	}()
 
 	go func() {
@@ -102,13 +117,16 @@ func (s *State) refreshDbtContext(wd string) {
 
 	s.DbtContext.ModelDetailMap = modelMap
 	s.DbtContext.SourceDetailMap = sourceMap
+	s.DbtContext.RefNames = refNames
 	s.DbtContext.MacroDetailMap = macroMap
 	s.DbtContext.VariableDetailMap = varMap
 }
 
+// parseDocument re-tokenizes a document, keeping its version.
 func (s *State) parseDocument(uri, text string) {
 	parserIns := parser.Parse(text, s.DbtContext.Dialect)
 	s.Documents[uri] = Document{
+		Version:   s.Documents[uri].Version,
 		Text:      text,
 		Tokens:    parserIns.CreateTokenIndex(),
 		DefTokens: parserIns.CreateTokenNameMap(),
@@ -116,8 +134,9 @@ func (s *State) parseDocument(uri, text string) {
 	}
 }
 
-func (s *State) OpenDocument(uri, text string) {
+func (s *State) OpenDocument(uri, text string, version int) {
 	s.refreshDbtContext(s.LspClientRootPath)
+	s.Documents[uri] = Document{Version: version}
 	s.parseDocument(uri, text)
 }
 
@@ -125,7 +144,7 @@ func (s *State) UpdateDocument(uri, text string) {
 	s.parseDocument(uri, text)
 }
 
-func (s *State) UpdateDocumentIncremental(uri string, changes []lsp.TextDocumentContentChangeEvent) {
+func (s *State) UpdateDocumentIncremental(uri string, version int, changes []lsp.TextDocumentContentChangeEvent) {
 	doc, exists := s.Documents[uri]
 	if !exists {
 		return
@@ -140,7 +159,23 @@ func (s *State) UpdateDocumentIncremental(uri string, changes []lsp.TextDocument
 		}
 	}
 
+	doc.Version = version
+	s.Documents[uri] = doc
 	s.parseDocument(uri, currentText)
+}
+
+// CloseDocument forgets a document and its dbt Fusion results.
+func (s *State) CloseDocument(uri string) {
+	delete(s.Documents, uri)
+	delete(s.FusionDiagnostics, uri)
+}
+
+// SetFusionDiagnostics replaces the dbt Fusion compile results for a document.
+func (s *State) SetFusionDiagnostics(uri string, diagnostics []lsp.Diagnostic) {
+	if s.FusionDiagnostics == nil {
+		s.FusionDiagnostics = map[string][]lsp.Diagnostic{}
+	}
+	s.FusionDiagnostics[uri] = diagnostics
 }
 
 func (s *State) applyIncrementalChange(text string, change lsp.TextDocumentContentChangeEvent) string {
@@ -198,11 +233,16 @@ func (s *State) SaveDocument(uri string) {
 	s.refreshDbtContext(s.LspClientRootPath)
 }
 
-func (s *State) Hover(id int, uri string, position lsp.Position) lsp.HoverResponse {
+// LoadProject reads the dbt project the client opened.
+func (s *State) LoadProject() {
+	s.refreshDbtContext(s.LspClientRootPath)
+}
+
+func (s *State) Hover(id lsp.ID, uri string, position lsp.Position) lsp.HoverResponse {
 	response := lsp.HoverResponse{
 		Response: lsp.Response{
 			RPC: "2.0",
-			ID:  &id,
+			ID:  id,
 		},
 		Result: lsp.HoverResult{
 			Contents: "",
@@ -255,11 +295,11 @@ func (s *State) Hover(id int, uri string, position lsp.Position) lsp.HoverRespon
 	return response
 }
 
-func (s *State) Definition(id int, uri string, position lsp.Position) lsp.DefinitionResponse {
+func (s *State) Definition(id lsp.ID, uri string, position lsp.Position) lsp.DefinitionResponse {
 	response := lsp.DefinitionResponse{
 		Response: lsp.Response{
 			RPC: "2.0",
-			ID:  &id,
+			ID:  id,
 		},
 		Result: lsp.Location{
 			URI: uri,
@@ -346,11 +386,11 @@ func (s *State) Definition(id int, uri string, position lsp.Position) lsp.Defini
 	return response
 }
 
-func (s *State) GoToSchema(id int, uri string, position lsp.Position) lsp.ExecuteCommandResponse {
+func (s *State) GoToSchema(id lsp.ID, uri string, position lsp.Position) lsp.ExecuteCommandResponse {
 	response := lsp.ExecuteCommandResponse{
 		Response: lsp.Response{
 			RPC: "2.0",
-			ID:  &id,
+			ID:  id,
 		},
 		Result: nil,
 	}
@@ -407,16 +447,28 @@ func getModelNameFromURI(uri string) string {
 	return ""
 }
 
-func (s *State) TextDocumentCompletion(id int, uri string, position lsp.Position) lsp.CompletionResponse {
-	items := []lsp.CompletionItem{}
+func (s *State) TextDocumentCompletion(id lsp.ID, uri string, position lsp.Position) lsp.CompletionResponse {
+	response := lsp.CompletionResponse{
+		Response: lsp.Response{
+			RPC: "2.0",
+			ID:  id,
+		},
+		Result: []lsp.CompletionItem{},
+	}
 
-	fileContents := s.Documents[uri].Text
-	lines := strings.Split(fileContents, "\n")
+	// A position outside the text (e.g. a document that was never opened) has nothing to complete.
+	lines := strings.Split(s.Documents[uri].Text, "\n")
+	if position.Line < 0 || position.Line >= len(lines) ||
+		position.Character < 0 || position.Character > len(lines[position.Line]) {
+		return response
+	}
 	lineText := lines[position.Line]
 
 	cursorOffset := int(position.Character)
 	textBeforeCursor := lineText[:cursorOffset]
 	textAfterCursor := lineText[cursorOffset:]
+
+	var items []lsp.CompletionItem
 
 	refRegex := regexp.MustCompile(`\bref\(('|")[a-zA-z]*$`)
 	sourceRegex := regexp.MustCompile(`\bsource\(('|")[a-zA-z]*$`)
@@ -445,13 +497,6 @@ func (s *State) TextDocumentCompletion(id int, uri string, position lsp.Position
 		items = s.DbtContext.Dialect.FunctionCompletionItems()
 	}
 
-	response := lsp.CompletionResponse{
-		Response: lsp.Response{
-			RPC: "2.0",
-			ID:  &id,
-		},
-		Result: items,
-	}
-
+	response.Result = items
 	return response
 }

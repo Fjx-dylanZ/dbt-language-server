@@ -312,7 +312,12 @@ func (ti *TokenIndex) IdentifierReferences(name string) []Token {
 	return refs
 }
 
+// FindTokenAtCursor returns the token covering the cursor. A nil index (a
+// document that was never opened) has no tokens.
 func (ti *TokenIndex) FindTokenAtCursor(line, column int) (*TokenLL, error) {
+	if ti == nil {
+		return nil, errors.New("document not parsed")
+	}
 	lineTokens, exists := ti.lineTokens[line]
 	if !exists {
 		return nil, errors.New("line does not exist")
@@ -323,7 +328,7 @@ func (ti *TokenIndex) FindTokenAtCursor(line, column int) (*TokenLL, error) {
 		return lineTokens[i].Token.Column+len(lineTokens[i].Token.Literal) > column
 	})
 
-	if idx >= 0 &&
+	if idx < len(lineTokens) &&
 		column >= lineTokens[idx].Token.Column &&
 		column < lineTokens[idx].Token.Column+len(lineTokens[idx].Token.Literal) {
 		return &lineTokens[idx], nil

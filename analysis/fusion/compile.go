@@ -17,7 +17,6 @@ import (
 	"github.com/j-clemons/dbt-language-server/analysis"
 	"github.com/j-clemons/dbt-language-server/lsp"
 	diagnosticseverity "github.com/j-clemons/dbt-language-server/lsp/diagnosticSeverity"
-	"github.com/j-clemons/dbt-language-server/util"
 )
 
 type FusionLog struct {
@@ -43,24 +42,12 @@ type Info struct {
 	Ts           string
 }
 
-func publishDiagnostics(writer io.Writer, uri string, diagnostics []lsp.Diagnostic) {
-	notification := lsp.DiagnosticsNotification{
-		Notification: lsp.Notification{
-			RPC:    "2.0",
-			Method: "textDocument/publishDiagnostics",
-		},
-		Params: lsp.PublishDiagnosticsParams{
-			URI:         uri,
-			Diagnostics: diagnostics,
-		},
-	}
-
-	util.WriteResponse(writer, notification)
-}
-
-func FusionCompile(s *analysis.State, uri string, logger *log.Logger, writer io.Writer) {
+// FusionCompile compiles the model behind uri with dbt Fusion and returns the
+// problems it reports for that file. It returns nil when Fusion is disabled or
+// cannot be run.
+func FusionCompile(s *analysis.State, uri string, logger *log.Logger) []lsp.Diagnostic {
 	if !s.IsFusionEnabled() {
-		return
+		return nil
 	}
 	selector := dbtModelSelectionFromUri(uri)
 
@@ -68,7 +55,7 @@ func FusionCompile(s *analysis.State, uri string, logger *log.Logger, writer io.
 	fusionArtifactPath, err := getFusionArtifactPath(projectName)
 	if err != nil {
 		logger.Printf("Failed to get fusion artifact path: %v", err)
-		return
+		return nil
 	}
 	cmd := exec.Command(
 		s.FusionPath,
@@ -86,51 +73,51 @@ func FusionCompile(s *analysis.State, uri string, logger *log.Logger, writer io.
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		logger.Println(err)
+		return nil
 	}
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		logger.Println(err)
+		return nil
 	}
 
 	if err := cmd.Start(); err != nil {
 		logger.Println(err)
+		return nil
 	}
 
 	diagnosticsChan := make(chan lsp.Diagnostic, 100)
-	diagnostics := []lsp.Diagnostic{}
-
-	var wg sync.WaitGroup
-
+	collected := make(chan []lsp.Diagnostic)
 	go func() {
+		diagnostics := []lsp.Diagnostic{}
 		for diagnostic := range diagnosticsChan {
 			diagnostics = append(diagnostics, diagnostic)
-			publishDiagnostics(writer, uri, diagnostics)
 		}
+		collected <- diagnostics
 	}()
 
-	wg.Add(1)
+	var wg sync.WaitGroup
+	wg.Add(2)
 	go func() {
 		defer wg.Done()
 		processStream(stdout, uri, logger, diagnosticsChan, "stdout")
 	}()
-
-	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		processStream(stderr, uri, logger, diagnosticsChan, "stderr")
 	}()
+	wg.Wait()
+	close(diagnosticsChan)
+	diagnostics := <-collected
 
-	go func() {
-		wg.Wait()
-		close(diagnosticsChan)
-	}()
-
+	// Wait closes the pipes, so it must come after the reads finish. A failed
+	// compile exits non-zero; its diagnostics are what we are after.
 	if err := cmd.Wait(); err != nil {
 		logger.Printf("Command failed: %v", err)
 	}
 
-	publishDiagnostics(writer, uri, diagnostics)
+	return diagnostics
 }
 
 func processStream(stream io.Reader, uri string, logger *log.Logger, diagnosticsChan chan lsp.Diagnostic, streamName string) {
